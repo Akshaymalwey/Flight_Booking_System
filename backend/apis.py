@@ -14,6 +14,8 @@ app.add_middleware(
    allow_headers=["*"],  # Allows all headers
 )
 
+#need to add functionality to allow group booking, passwords, autocomplete search
+#
 @app.get("/show_tables")
 def show_db_tables():
     conn = get_connection()
@@ -26,7 +28,7 @@ def show_db_tables():
     conn.close()
     return rows
 
-@app.post("/insert_into_passenger")
+@app.post("/insert_into_passenger") #need to add password here
 async def insert_into_passenger_table(request: Request):
 
     data = await request.json()
@@ -39,6 +41,7 @@ async def insert_into_passenger_table(request: Request):
     gender = data.get("gender")
     nationality = data.get("nationality")
     email = data.get("email")
+    password = data.get("password")
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -52,6 +55,12 @@ async def insert_into_passenger_table(request: Request):
         passenger_id, gov_id_type, doc_id_number, name,
         dob, gender, nationality, email
     ))
+
+    query = """
+            INSERT INTO passenger_login
+            VALUES (%s, %s)
+        """
+    cursor.execute(query, (passenger_id, password))
 
     conn.commit()
     cursor.close()
@@ -93,37 +102,111 @@ async def get_flight_details(from_date, to_date, source_airport, destination_air
             flights_data.append(flight)
     return flights_data
 
-@app.post("/generate_ticket")
-async def insert_into_booking_table(request: Request):
-    data = await request.json()
-    pnr = generate_pnr()
-    booker_id = data.get("passenger_id")
-    status_code = data.get("status_code")
-    schedule_id = data.get("schedule_id")
-    class_code = data.get("class_code")
-    price = data.get("price")
-    seat_number = data.get("seat_number")
+@app.post("/generate_ticket")#this takes in a list of passengers 
+async def insert_into_booking_table(request: Request):#[{booker_id: "P1", passenger_id: "P1", status_code: "CNF", schedule_id: "F1", class_code: "ECONOMY", price: 100, seat_number: "1A"},{booker_id: "P1", passenger_id: "P2", status_code: "CNF", schedule_id: "F1", class_code: "ECONOMY", price: 100, seat_number: "1B"}]
+    try:
+        data = await request.json()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    query = """
-            INSERT INTO booking (pnr, booker_id, status_code)
-            VALUES (%s, %s, %s)
-        """
-    cursor.execute(query, (pnr, booker_id, status_code))
+        # Handle both single object and array
+        if isinstance(data, dict):
+            data = [data]
 
-    ticket_id = generate_ticket_id()
-    query = """
-                INSERT INTO ticket (ticket_id, pnr, passenger_id, schedule_id, class_code, price, seat_number)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+        # Validate required fields
+        for passenger_data in data:
+            if not passenger_data.get("booker_id"):
+                return {"status": "400", "error": "booker_id is required"}
+            if not passenger_data.get("passenger_id"):
+                return {"status": "400", "error": "passenger_id is required"}
+            if not passenger_data.get("schedule_id"):
+                return {"status": "400", "error": "schedule_id is required"}
+            if not passenger_data.get("class_code"):
+                return {"status": "400", "error": "class_code is required"}
+            if not passenger_data.get("seat_number"):
+                return {"status": "400", "error": "seat_number is required"}
+
+        pnr_list = []
+        ticket_id_list = []
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get the last PNR once to generate sequential PNRs
+            query_last_pnr = """
+                select pnr 
+                from booking
+                order by cast(substring(pnr, 4) AS unsigned) desc
+                limit 1
             """
-    cursor.execute(query, (ticket_id,pnr, booker_id,schedule_id, class_code, price, seat_number))
+            cursor.execute(query_last_pnr)
+            result_last_pnr = cursor.fetchone()
+            
+            if result_last_pnr:
+                last_id = result_last_pnr[0]
+                last_num = int(last_id[3:])
+                start_num = last_num + 1
+            else:
+                start_num = 1
+            
+            # Generate all PNRs upfront to prevent race conditions
+            for i in range(len(data)):
+                pnr_list.append(f"PNR{start_num + i}")
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+            # Get the last ticket ID once to generate sequential ticket IDs
+            query_last_ticket = """
+                select ticket_id
+                from ticket
+                order by cast(substring(ticket_id, 2) AS unsigned) desc
+                limit 1
+            """
+            cursor.execute(query_last_ticket)
+            result_last_ticket = cursor.fetchone()
+            
+            if result_last_ticket:
+                last_ticket_id = result_last_ticket[0]
+                last_ticket_num = int(last_ticket_id[1:])
+                start_ticket_num = last_ticket_num + 1
+            else:
+                start_ticket_num = 1
+            
+            # Generate all ticket IDs upfront to prevent race conditions
+            for i in range(len(data)):
+                ticket_id_list.append(f"T{start_ticket_num + i}")
 
-    return {"status": "200", "pnr":pnr, "ticket_id":ticket_id}
+            for idx, passenger_data in enumerate(data):
+                pnr = pnr_list[idx]  # Use pre-generated PNR
+                ticket_id = ticket_id_list[idx]  # Use pre-generated ticket ID
+                booker_id = passenger_data.get("booker_id")
+                passenger_id = passenger_data.get("passenger_id")
+                status_code = passenger_data.get("status_code", "CNF")
+                schedule_id = passenger_data.get("schedule_id")
+                class_code = passenger_data.get("class_code")
+                price = passenger_data.get("price", 0)
+                seat_number = passenger_data.get("seat_number")
+
+                query_booking = """
+                    INSERT INTO booking (pnr, booker_id, status_code)
+                    VALUES (%s, %s, %s)
+                """
+                cursor.execute(query_booking, (pnr, booker_id, status_code))
+                query_ticket = """
+                    INSERT INTO ticket (ticket_id, pnr, passenger_id, schedule_id, class_code, price, seat_number)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(query_ticket, (ticket_id, pnr, passenger_id, schedule_id, class_code, price, seat_number))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return {"status": "200", "pnr": pnr_list, "ticket_id": ticket_id_list}
+            
+        except Exception as e:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return {"status": "500", "error": str(e)}
+            
+    except Exception as e:
+        return {"status": "500", "error": f"Failed to process request: {str(e)}"}
 
 
 @app.get("/get_passenger_tickets")
@@ -172,14 +255,23 @@ async def get_passenger_ticket(passenger_id):
 
     return ticket_data
 
-@app.get("/check_user_exists")
-async def check_user_exists(passenger_id):
+@app.post("/check_user_exists") #checks if user exists and if password is same
+async def check_user_exists(request:Request):
+    data = await request.json()
+
+    passenger_id = data.get("passenger_id")
+    password = data.get("password")
+
+    if not passenger_id or not password:
+        return {"message": "passenger_id and password are required"}
 
     conn = get_connection()
     cursor = conn.cursor()
 
     query = """
-                    select * from passenger where passenger_id = %s
+                    select * from passenger join passenger_login 
+                    on passenger.passenger_id = passenger_login.passenger_id 
+                    and passenger.passenger_id = %s;
             """
     cursor.execute(query, (passenger_id,))
 
@@ -188,16 +280,21 @@ async def check_user_exists(passenger_id):
     conn.close()
     passenger_data = {}
     if row:
-        passenger_data["passenger_id"] = row[0]
-        passenger_data["gov_id_type"] = row[1]
-        passenger_data["phone_number"] = row[2]
-        passenger_data["name"] = row[3]
-        passenger_data["dob"] = row[4]
-        passenger_data["gender"] = row[5]
-        passenger_data["nationality"] = row[6]
-        passenger_data["email_address"] = row[7]
+        if row[9] == password:
+            passenger_data["passenger_id"] = row[0]
+            passenger_data["gov_id_type"] = row[1]
+            passenger_data["phone_number"] = row[2]
+            passenger_data["name"] = row[3]
+            passenger_data["dob"] = row[4]
+            passenger_data["gender"] = row[5]
+            passenger_data["nationality"] = row[6]
+            passenger_data["email_address"] = row[7]
+            return passenger_data
+        else:
+            return {"message":"incorrect password"}
+    else:
+        return {"message":"no such user exists"}
 
-    return passenger_data
 
 
 @app.get("/get_available_seats")
@@ -311,3 +408,29 @@ async def cancel_ticket(request: Request):
     conn.close()
 
     return {"message":"Success"}
+
+
+@app.get("/autocomplete_suggestions")
+async def autocomplete(term):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = f"""
+            select apt_code, name, country from airport where apt_code like '%{term}%' or name like '%{term}%' or country like '%{term}%';
+            """
+    cursor.execute(query)
+
+    rows= cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    airport_data = []
+    if rows:
+        for row in rows:
+            data = {}
+            data["apt_code"] = row[0]
+            data["airport_name"] = row[1]
+            data["country"] = row[2]
+            airport_data.append(data)
+
+    return airport_data

@@ -4,6 +4,7 @@ import "../App.css";
 
 function Login() {
   const [passengerId, setPassengerId] = useState("");
+  const [password, setPassword] = useState("");
   const [passenger, setPassenger] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -26,10 +27,24 @@ function Login() {
       return;
     }
 
+    if (!password) {
+      setError("Please enter your password");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
-    fetch(`http://localhost:8001/check_user_exists?passenger_id=${passengerId}`)
+    fetch(`http://localhost:8001/check_user_exists`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        passenger_id: passengerId,
+        password: password,
+      }),
+    })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);
@@ -37,7 +52,16 @@ function Login() {
         return res.json();
       })
       .then((data) => {
-        if (data && Object.keys(data).length > 0) {
+        // Check for error messages from backend
+        if (data?.message) {
+          setError(data.message);
+          setPassenger(null);
+          localStorage.removeItem("passengerId");
+          localStorage.removeItem("passengerData");
+          return;
+        }
+
+        if (data && Object.keys(data).length > 0 && data.passenger_id) {
           setPassenger(data);
 
           // Store passenger data in localStorage
@@ -71,6 +95,7 @@ function Login() {
     localStorage.removeItem("passengerData");
     setPassenger(null);
     setPassengerId("");
+    setPassword("");
     setError(null);
   };
 
@@ -103,7 +128,7 @@ function Login() {
         <div className="auth-card">
           <div className="auth-header">
             <h1>Login</h1>
-            <p>Enter your Passenger ID to access your account</p>
+            <p>Enter your Passenger ID and password to access your account</p>
           </div>
 
           {error && !passenger && (
@@ -128,6 +153,18 @@ function Login() {
                   placeholder="Enter your Passenger ID"
                   value={passengerId}
                   onChange={(e) => setPassengerId(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="password">Password</label>
+                <input
+                  type="password"
+                  id="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                 />
               </div>

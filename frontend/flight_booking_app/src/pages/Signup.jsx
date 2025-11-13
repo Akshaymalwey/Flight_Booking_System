@@ -13,6 +13,7 @@ function Signup() {
     gender: "",
     nationality: "",
     email: "",
+    password: "",
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -61,9 +62,16 @@ function Signup() {
       !formData.DOB ||
       !formData.gender ||
       !formData.nationality.trim() ||
-      !formData.email.trim()
+      !formData.email.trim() ||
+      !formData.password.trim()
     ) {
       setError("Please fill all fields.");
+      return;
+    }
+
+    // Password strength validation
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters long.");
       return;
     }
 
@@ -130,6 +138,7 @@ function Signup() {
         gender: "",
         nationality: "",
         email: "",
+        password: "",
       });
     } catch (err) {
       console.error("Error creating passenger:", err);
@@ -236,15 +245,19 @@ function Signup() {
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="gov_id_type">Government ID Type</label>
-                  <input
-                    type="text"
+                  <select
                     id="gov_id_type"
                     name="gov_id_type"
                     value={formData.gov_id_type}
                     onChange={handleChange}
-                    placeholder="e.g., Passport, Driver's License"
                     required
-                  />
+                  >
+                    <option value="">Select Government ID Type</option>
+                    <option value="Aadhar">Aadhar</option>
+                    <option value="Driver's Licence">Driver's Licence</option>
+                    <option value="PAN Card">PAN Card</option>
+                    <option value="Passport">Passport</option>
+                  </select>
                 </div>
 
                 <div className="form-group">
@@ -330,6 +343,20 @@ function Signup() {
                     required
                   />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="password">Password</label>
+                <input
+                  type="password"
+                  id="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Enter a password (min 6 characters)"
+                  required
+                  minLength={6}
+                />
               </div>
 
               <div className="form-actions">
